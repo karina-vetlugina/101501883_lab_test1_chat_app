@@ -78,6 +78,25 @@
 
         <p><strong>Current Room:</strong> <span id="currentRoom">None</span></p>
 
+        <hr />
+
+        <h5>Private Chat (1-to-1)</h5>
+
+        <div class="row mb-3">
+          <div class="col-md-8">
+            <select id="privateUserSelect" class="form-select">
+              <option value="">Select user...</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="input-group mb-3">
+          <input type="text" id="privateMessageInput" class="form-control" placeholder="Type private message..." />
+          <button class="btn btn-warning" id="privateSendBtn">Send Private</button>
+        </div>
+
+        <hr />
+
         <div id="chatBox"></div>
 
         <div class="mt-2">
@@ -97,7 +116,6 @@
 
   <script>
     const socket = io();
-    socket.emit("registerUser", { username: user.username });
 
     const userData = localStorage.getItem("user");
 
@@ -106,6 +124,9 @@
     }
 
     const user = JSON.parse(userData);
+
+    // register user for private chat room
+    socket.emit("registerUser", { username: user.username });
 
     document.getElementById("userDisplay").innerText = user.username;
 
@@ -117,6 +138,11 @@
     const chatBox = document.getElementById("chatBox");
     const currentRoomText = document.getElementById("currentRoom");
     const logoutBtn = document.getElementById("logoutBtn");
+
+    const privateUserSelect = document.getElementById("privateUserSelect");
+    const privateMessageInput = document.getElementById("privateMessageInput");
+    const privateSendBtn = document.getElementById("privateSendBtn");
+    const typingStatus = document.getElementById("typingStatus");
 
     let currentRoom = null;
     let typingTimer;
@@ -133,6 +159,29 @@
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    // load users for private chat dropdown
+    async function loadUsers() {
+      try {
+        const response = await fetch("/api/auth/users");
+        const users = await response.json();
+
+        privateUserSelect.innerHTML = `<option value="">Select user...</option>`;
+
+        users.forEach((u) => {
+          if (u.username !== user.username) {
+            const option = document.createElement("option");
+            option.value = u.username;
+            option.textContent = u.username;
+            privateUserSelect.appendChild(option);
+          }
+        });
+      } catch (err) {
+        console.log("Error loading users:", err);
+      }
+    }
+
+    loadUsers();
 
     // join room
     joinBtn.addEventListener("click", () => {
@@ -173,7 +222,7 @@
       addMessageToChat("You left the room.", "system");
     });
 
-    // send message
+    // send group message
     sendBtn.addEventListener("click", () => {
       const msg = messageInput.value.trim();
 
@@ -193,7 +242,7 @@
       messageInput.value = "";
     });
 
-    // press Enter to send
+    // press Enter to send group message
     messageInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
         sendBtn.click();
@@ -222,6 +271,73 @@
         addMessageToChat(`${data.from_user}: ${data.message}`, "my");
       } else {
         addMessageToChat(`${data.from_user}: ${data.message}`, "other");
+      }
+    });
+
+    // send private message
+    privateSendBtn.addEventListener("click", () => {
+      const msg = privateMessageInput.value.trim();
+      const toUser = privateUserSelect.value;
+
+      if (!toUser) {
+        addMessageToChat("Select a user for private chat first.", "system");
+        return;
+      }
+
+      if (msg.length === 0) return;
+
+      socket.emit("privateMessage", {
+        from_user: user.username,
+        to_user: toUser,
+        message: msg
+      });
+
+      privateMessageInput.value = "";
+    });
+
+    // press Enter to send private message
+    privateMessageInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        privateSendBtn.click();
+      }
+    });
+
+    // typing indicator for private chat
+    privateMessageInput.addEventListener("input", () => {
+      const toUser = privateUserSelect.value;
+
+      if (!toUser) return;
+
+      socket.emit("typing", {
+        from_user: user.username,
+        to_user: toUser
+      });
+
+      clearTimeout(typingTimer);
+
+      typingTimer = setTimeout(() => {
+        socket.emit("stopTyping", {
+          from_user: user.username,
+          to_user: toUser
+        });
+      }, 800);
+    });
+
+    // receive typing indicator
+    socket.on("typing", (data) => {
+      typingStatus.innerText = `${data.from_user} is typing...`;
+    });
+
+    socket.on("stopTyping", () => {
+      typingStatus.innerText = "";
+    });
+
+    // receive private message
+    socket.on("newPrivateMessage", (data) => {
+      if (data.from_user === user.username) {
+        addMessageToChat(`(Private to ${data.to_user}) ${data.from_user}: ${data.message}`, "my");
+      } else {
+        addMessageToChat(`(Private from ${data.from_user}) ${data.from_user}: ${data.message}`, "other");
       }
     });
 
