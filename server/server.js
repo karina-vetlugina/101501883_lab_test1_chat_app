@@ -5,6 +5,8 @@ const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
+const GroupMessage = require("./models/GroupMessage");
+const PrivateMessage = require("./models/PrivateMessage");
 
 dotenv.config();
 
@@ -55,26 +57,84 @@ mongoose
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  socket.on("joinRoom", (data) => {
+  // join room
+  socket.on("joinRoom", async (data) => {
     socket.join(data.room);
 
+    console.log(`${data.username} joined room: ${data.room}`);
+
+    // send system message
     io.to(data.room).emit("roomMessage", {
       message: `${data.username} joined the room`,
-      room: data.room,
+      room: data.room
     });
 
-    console.log(`${data.username} joined room: ${data.room}`);
+    // load chat history from DB
+    const history = await GroupMessage.find({ room: data.room })
+      .sort({ date_sent: 1 })
+      .limit(50);
+
+    socket.emit("roomHistory", history);
   });
 
+  // leave room
   socket.on("leaveRoom", (data) => {
     socket.leave(data.room);
 
+    console.log(`${data.username} left room: ${data.room}`);
+
     io.to(data.room).emit("roomMessage", {
       message: `${data.username} left the room`,
-      room: data.room,
+      room: data.room
     });
+  });
 
-    console.log(`${data.username} left room: ${data.room}`);
+  // group message
+  socket.on("groupMessage", async (data) => {
+    try {
+      const newMessage = new GroupMessage({
+        from_user: data.from_user,
+        room: data.room,
+        message: data.message
+      });
+
+      const savedMessage = await newMessage.save();
+
+      io.to(data.room).emit("newGroupMessage", savedMessage);
+    } catch (err) {
+      console.log("Group message error:", err);
+    }
+  });
+
+  // private message (store in DB)
+  socket.on("privateMessage", async (data) => {
+    try {
+      const newPrivate = new PrivateMessage({
+        from_user: data.from_user,
+        to_user: data.to_user,
+        message: data.message
+      });
+
+      const savedPrivate = await newPrivate.save();
+
+      socket.emit("newPrivateMessage", savedPrivate);
+      socket.to(data.to_user).emit("newPrivateMessage", savedPrivate);
+    } catch (err) {
+      console.log("Private message error:", err);
+    }
+  });
+
+  // typing indicator (private chat)
+  socket.on("typing", (data) => {
+    socket.to(data.to_user).emit("typing", {
+      from_user: data.from_user
+    });
+  });
+
+  socket.on("stopTyping", (data) => {
+    socket.to(data.to_user).emit("stopTyping", {
+      from_user: data.from_user
+    });
   });
 
   socket.on("disconnect", () => {

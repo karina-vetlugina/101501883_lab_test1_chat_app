@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Room</title>
+
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <style>
+    #chatBox {
+      height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      background: white;
+    }
+
+    .msg {
+      padding: 6px 10px;
+      margin-bottom: 6px;
+      border-radius: 8px;
+    }
+
+    .myMsg {
+      background: #d1e7dd;
+      text-align: right;
+    }
+
+    .otherMsg {
+      background: #f8d7da;
+      text-align: left;
+    }
+
+    .systemMsg {
+      background: #e2e3e5;
+      text-align: center;
+      font-style: italic;
+    }
+  </style>
+</head>
+
+<body class="bg-light">
+
+  <div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3>Chat Application</h3>
+      <button class="btn btn-danger" id="logoutBtn">Logout</button>
+    </div>
+
+    <div class="card shadow">
+      <div class="card-body">
+
+        <p><strong>Logged in as:</strong> <span id="userDisplay"></span></p>
+
+        <div class="row mb-3">
+          <div class="col-md-8">
+            <select id="roomSelect" class="form-select">
+              <option value="devops">devops</option>
+              <option value="cloud computing">cloud computing</option>
+              <option value="covid19">covid19</option>
+              <option value="sports">sports</option>
+              <option value="nodeJS">nodeJS</option>
+            </select>
+          </div>
+
+          <div class="col-md-2">
+            <button class="btn btn-primary w-100" id="joinBtn">Join</button>
+          </div>
+
+          <div class="col-md-2">
+            <button class="btn btn-secondary w-100" id="leaveBtn">Leave</button>
+          </div>
+        </div>
+
+        <p><strong>Current Room:</strong> <span id="currentRoom">None</span></p>
+
+        <div id="chatBox"></div>
+
+        <div class="mt-2">
+          <small id="typingStatus" class="text-muted"></small>
+        </div>
+
+        <div class="input-group mt-3">
+          <input type="text" id="messageInput" class="form-control" placeholder="Type your message..." />
+          <button class="btn btn-success" id="sendBtn">Send</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    const socket = io();
+
+    const userData = localStorage.getItem("user");
+
+    if (!userData) {
+      window.location.href = "/login";
+    }
+
+    const user = JSON.parse(userData);
+
+    document.getElementById("userDisplay").innerText = user.username;
+
+    const roomSelect = document.getElementById("roomSelect");
+    const joinBtn = document.getElementById("joinBtn");
+    const leaveBtn = document.getElementById("leaveBtn");
+    const sendBtn = document.getElementById("sendBtn");
+    const messageInput = document.getElementById("messageInput");
+    const chatBox = document.getElementById("chatBox");
+    const currentRoomText = document.getElementById("currentRoom");
+    const logoutBtn = document.getElementById("logoutBtn");
+
+    let currentRoom = null;
+    let typingTimer;
+
+    function addMessageToChat(text, type) {
+      const div = document.createElement("div");
+      div.classList.add("msg");
+
+      if (type === "my") div.classList.add("myMsg");
+      else if (type === "other") div.classList.add("otherMsg");
+      else div.classList.add("systemMsg");
+
+      div.innerText = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // join room
+    joinBtn.addEventListener("click", () => {
+      const selectedRoom = roomSelect.value;
+
+      if (currentRoom) {
+        addMessageToChat("You must leave current room before joining another.", "system");
+        return;
+      }
+
+      currentRoom = selectedRoom;
+      currentRoomText.innerText = currentRoom;
+
+      chatBox.innerHTML = "";
+
+      socket.emit("joinRoom", {
+        username: user.username,
+        room: currentRoom
+      });
+    });
+
+    // leave room
+    leaveBtn.addEventListener("click", () => {
+      if (!currentRoom) {
+        addMessageToChat("You are not in a room.", "system");
+        return;
+      }
+
+      socket.emit("leaveRoom", {
+        username: user.username,
+        room: currentRoom
+      });
+
+      currentRoom = null;
+      currentRoomText.innerText = "None";
+
+      chatBox.innerHTML = "";
+      addMessageToChat("You left the room.", "system");
+    });
+
+    // send message
+    sendBtn.addEventListener("click", () => {
+      const msg = messageInput.value.trim();
+
+      if (!currentRoom) {
+        addMessageToChat("Join a room first!", "system");
+        return;
+      }
+
+      if (msg.length === 0) return;
+
+      socket.emit("groupMessage", {
+        from_user: user.username,
+        room: currentRoom,
+        message: msg
+      });
+
+      messageInput.value = "";
+    });
+
+    // press Enter to send
+    messageInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        sendBtn.click();
+      }
+    });
+
+    // receive system message
+    socket.on("roomMessage", (data) => {
+      addMessageToChat(data.message, "system");
+    });
+
+    // load history
+    socket.on("roomHistory", (messages) => {
+      messages.forEach((m) => {
+        if (m.from_user === user.username) {
+          addMessageToChat(`${m.from_user}: ${m.message}`, "my");
+        } else {
+          addMessageToChat(`${m.from_user}: ${m.message}`, "other");
+        }
+      });
+    });
+
+    // receive new group message
+    socket.on("newGroupMessage", (data) => {
+      if (data.from_user === user.username) {
+        addMessageToChat(`${data.from_user}: ${data.message}`, "my");
+      } else {
+        addMessageToChat(`${data.from_user}: ${data.message}`, "other");
+      }
+    });
+
+    // logout
+    logoutBtn.addEventListener("click", () => {
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+    });
+  </script>
+
+</body>
+</html>
