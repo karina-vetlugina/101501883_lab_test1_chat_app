@@ -97,6 +97,7 @@
 
   <script>
     const socket = io();
+    socket.emit("registerUser", { username: user.username });
 
     const userData = localStorage.getItem("user");
 

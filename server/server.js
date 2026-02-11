@@ -57,6 +57,12 @@ mongoose
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
+  // register user for private messaging (1to1)
+  socket.on("registerUser", (data) => {
+    socket.join(data.username);
+    console.log(`Registered private room for: ${data.username}`);
+  });
+
   // join room
   socket.on("joinRoom", async (data) => {
     socket.join(data.room);
